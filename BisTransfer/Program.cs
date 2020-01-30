@@ -45,11 +45,12 @@ namespace BisTransfer
 
             // Define request parameters.
             String spreadsheetId = "10IV_3NEmZdhh8iQXrs2Ek77YyUJbjBMWO5UxIWLlZl0";
-            String range = "Equipment & enchants!A1:BC";
+            String range = "Equipment & enchants!A203:BC223";
 
             SpreadsheetsResource.ValuesResource.GetRequest request = new SpreadsheetsResource.ValuesResource.GetRequest(service, spreadsheetId, range)
             {
-                ValueRenderOption = SpreadsheetsResource.ValuesResource.GetRequest.ValueRenderOptionEnum.FORMULA
+                ValueRenderOption = SpreadsheetsResource.ValuesResource.GetRequest.ValueRenderOptionEnum.FORMULA,
+                MajorDimension = SpreadsheetsResource.ValuesResource.GetRequest.MajorDimensionEnum.ROWS                
             };
 
             // Prints the names and majors of students in a sample spreadsheet:
