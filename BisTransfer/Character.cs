@@ -15,6 +15,7 @@ namespace BisTransfer
             this.Spec = spec;
             this.Raw = new List<IList<object>>();
             this.PhaseList = new List<Phase>();
+            this.Items = new List<Item>();
         }
 
         public int Id { get; set; }
