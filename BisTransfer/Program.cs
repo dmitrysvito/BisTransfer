@@ -12,6 +12,10 @@ using Newtonsoft.Json;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Text;
+using RestSharp;
+using System.Threading.Tasks;
+using System.Net.Http;
+using System.Net;
 
 namespace BisTransfer
 {
@@ -24,9 +28,12 @@ namespace BisTransfer
 
         static void Main(string[] args)
         {
+            var url = "https://i.imgur.com/uOHqdTz.png";
+            GetTextFromImage(url);
+            return;
             const string spreadsheetId = "10IV_3NEmZdhh8iQXrs2Ek77YyUJbjBMWO5UxIWLlZl0";
             UserCredential credential;
-            
+
             using (var stream = new FileStream("credentials.json", FileMode.Open, FileAccess.Read))
             {
                 // The file token.json stores the user's access and refresh tokens, and is created
@@ -55,7 +62,7 @@ namespace BisTransfer
                 new Phase(4, "B244:BC264"),
                 new Phase(5, "B361:BC381"),
                 new Phase(6, "B402:BC419"),
-            };           
+            };
 
             var rangeList = phaseList.Select(x => x.GetPhaseString());
             var ranges = new Google.Apis.Util.Repeatable<string>(rangeList);
@@ -97,9 +104,9 @@ namespace BisTransfer
                 new Character(47, CharacterEnum.Warlock),
 
                 new Character(50, CharacterEnum.Warrior, SpecEnum.Fury),
-                new Character(53, CharacterEnum.Warrior, SpecEnum.Protection)                
+                new Character(53, CharacterEnum.Warrior, SpecEnum.Protection)
             };
-            
+
             var slotList = new SlotEnum[21];
             slotList[0] = SlotEnum.Head;
             slotList[1] = SlotEnum.Neck;
@@ -122,7 +129,7 @@ namespace BisTransfer
             slotList[18] = SlotEnum.None;
             slotList[19] = SlotEnum.TwoHand;
             slotList[20] = SlotEnum.Ranged;
-            
+
             foreach (var range in response.ValueRanges)
             {
                 foreach (var phase in phaseList)
@@ -139,7 +146,8 @@ namespace BisTransfer
                 foreach (var phase in phaseList)
                 {
                     var charRaw = phase.Raw[character.Id];
-                    character.PhaseList.Add(new Phase(phase.Id, phase.Range) {
+                    character.PhaseList.Add(new Phase(phase.Id, phase.Range)
+                    {
                         CharacterRaw = charRaw
                     });
 
@@ -159,7 +167,7 @@ namespace BisTransfer
                                 if (!existingItem.PhaseList.Contains(phase.Id))
                                 {
                                     existingItem.PhaseList.Add(phase.Id);
-                                }                                
+                                }
                             }
                         }
                     }
@@ -207,7 +215,7 @@ namespace BisTransfer
                     foreach (var item in character.Items)
                     {
                         sw.WriteLine(regularStringPattern, item.Id, item.Slot, item.Name, item.GetPhaseString());
-                    }                    
+                    }
                 }
             }
             sb.AppendLine(@"</Ui>");
@@ -219,6 +227,56 @@ namespace BisTransfer
 
 
             Console.Read();
+        }
+
+        /// <summary>
+        /// Get Access token to query Blizzard API
+        /// </summary>
+        /// <param name="clientId"></param>
+        /// <param name="clientSecret"></param>
+        /// <returns>access token object</returns>
+        private static string GetAccessToken(string clientId, string clientSecret)
+        {
+            var client = new RestClient("https://eu.battle.net/oauth/token");
+            var request = new RestRequest(Method.POST);
+            request.AddHeader("cache-control", "no-cache");
+            request.AddHeader("content-type", "application/x-www-form-urlencoded");
+            request.AddParameter("application/x-www-form-urlencoded", $"grant_type=client_credentials&client_id={clientId}&client_secret={clientSecret}", ParameterType.RequestBody);
+            IRestResponse response = client.Execute(request);
+
+            var tokenResponse = JsonConvert.DeserializeObject<AccessTokenResponse>(response.Content);
+
+            return tokenResponse.access_token;
+        }
+
+        private static void GetTextFromImage(string url)
+        {
+            const string imageDir = @"images";
+            string filename = string.Empty;
+            string filePath = string.Empty;
+                       
+            var imgUri = new Uri(url);
+
+            filename = Path.GetFileName(imgUri.LocalPath);
+            filePath = $@"{imageDir}\{filename}";
+
+            var Ocr = new IronOcr.AutoOcr();
+            if (!File.Exists(filePath))
+            {
+                using (WebClient client = new WebClient())
+                {
+                    client.DownloadFile(imgUri, filePath);
+                }
+            }
+            
+            var Result = Ocr.Read(filePath);
+            Console.WriteLine(Result.Text);
+            Console.ReadLine();
+        }
+
+        private static void GetWowHeadItemInfo(string name)
+        {
+            //https://www.wowhead.com/search/suggestions-template?q=Onyxia+Tooth+Pendant
         }
 
         //=HYPERLINK("https://classic.wowhead.com/item=10504/green-lens","Green Lens of Arcane Wrath")
