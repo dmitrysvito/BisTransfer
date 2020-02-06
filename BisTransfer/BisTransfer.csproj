@@ -91,6 +91,8 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SlotEnum.cs" />
     <Compile Include="SpecEnum.cs" />
+    <Compile Include="WowHeadResult.cs" />
+    <Compile Include="WowHeadSearchResponse.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config">

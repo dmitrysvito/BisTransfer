@@ -28,8 +28,11 @@ namespace BisTransfer
 
         static void Main(string[] args)
         {
-            var url = "https://i.imgur.com/uOHqdTz.png";
-            GetTextFromImage(url);
+            //var url = "https://i.imgur.com/uOHqdTz.png";
+            //var Op = GetTextFromImage(url);
+
+            var res = GetWowHeadItemInfo(new List<string>() { "Thunderfury", "Puissant Cape", "Cape of the Black Baron" });
+
             return;
             const string spreadsheetId = "10IV_3NEmZdhh8iQXrs2Ek77YyUJbjBMWO5UxIWLlZl0";
             UserCredential credential;
@@ -154,19 +157,22 @@ namespace BisTransfer
                     for (int i = 0; i < charRaw.Count; i++)
                     {
                         var itemRaw = charRaw[i];
-                        var item = ParseItemRow((string)itemRaw, slotList[i], phase);
-                        if (item != null)
+                        IList<Item> items = ParseItemRow((string)itemRaw, slotList[i], phase);
+                        if (items.Any())
                         {
-                            var existingItem = character.Items.FirstOrDefault(x => x.Id == item.Id);
-                            if (existingItem == null)
+                            foreach (var item in items)
                             {
-                                character.Items.Add(item);
-                            }
-                            else
-                            {
-                                if (!existingItem.PhaseList.Contains(phase.Id))
+                                var existingItem = character.Items.FirstOrDefault(x => x.Id == item.Id);
+                                if (existingItem == null)
                                 {
-                                    existingItem.PhaseList.Add(phase.Id);
+                                    character.Items.Add(item);
+                                }
+                                else
+                                {
+                                    if (!existingItem.PhaseList.Contains(phase.Id))
+                                    {
+                                        existingItem.PhaseList.Add(phase.Id);
+                                    }
                                 }
                             }
                         }
@@ -235,7 +241,7 @@ namespace BisTransfer
         /// <param name="clientId"></param>
         /// <param name="clientSecret"></param>
         /// <returns>access token object</returns>
-        private static string GetAccessToken(string clientId, string clientSecret)
+        internal static string GetAccessToken(string clientId, string clientSecret)
         {
             var client = new RestClient("https://eu.battle.net/oauth/token");
             var request = new RestRequest(Method.POST);
@@ -249,12 +255,14 @@ namespace BisTransfer
             return tokenResponse.access_token;
         }
 
-        private static void GetTextFromImage(string url)
+        internal static string GetTextFromImage(string url)
         {
             const string imageDir = @"images";
             string filename = string.Empty;
             string filePath = string.Empty;
-                       
+
+            Directory.CreateDirectory(imageDir);
+
             var imgUri = new Uri(url);
 
             filename = Path.GetFileName(imgUri.LocalPath);
@@ -270,41 +278,91 @@ namespace BisTransfer
             }
             
             var Result = Ocr.Read(filePath);
-            Console.WriteLine(Result.Text);
-            Console.ReadLine();
+            return Result.Text;
         }
 
-        private static void GetWowHeadItemInfo(string name)
+        internal static IList<Item> GetWowHeadItemInfo(IList<string> names, SlotEnum slot = SlotEnum.None, Phase phase = null)
         {
-            //https://www.wowhead.com/search/suggestions-template?q=Onyxia+Tooth+Pendant
+            var result = new List<Item>();
+            var searchUrl = @"https://www.wowhead.com/search/suggestions-template?q=";
+
+            ServicePointManager.Expect100Continue = true;
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls
+                   | SecurityProtocolType.Tls11
+                   | SecurityProtocolType.Tls12
+                   | SecurityProtocolType.Ssl3;
+
+            using (WebClient client = new WebClient())
+            {
+                foreach (string name in names)
+                {
+                    var data = client.DownloadString($"{searchUrl}{name}");
+                    var response = JsonConvert.DeserializeObject<WowHeadSearchResponse>(data);
+                    //todo: put result to database for cache
+                }
+            }
+            return result;
         }
 
-        //=HYPERLINK("https://classic.wowhead.com/item=10504/green-lens","Green Lens of Arcane Wrath")
-        private static Item ParseItemRow(string row, SlotEnum slot, Phase phase)
+        internal static IList<Item> ParseItemRow(string row, SlotEnum slot, Phase phase)
         {
             if (string.IsNullOrWhiteSpace(row))
             {
                 return null;
             }
-            Regex regex = new Regex(@"=(\d+).*"".+""(.+)""");
-            MatchCollection matches = regex.Matches(row);
 
-            int id = 0;
-            string name = string.Empty;
+            IList<Item> result = new List<Item>();
 
-            foreach (Match match in matches)
+            //=HYPERLINK("https://classic.wowhead.com/item=10504/green-lens","Green Lens of Arcane Wrath")
+            //=hyperlink("https://classic.wowhead.com/item=21581", Image("https://i.imgur.com/bUGqvjy.png", 2))
+            Regex idAndName = new Regex(@"=(\d+).*"".+""(.+)""");
+            MatchCollection idAndNameMatches = idAndName.Matches(row);
+
+            foreach (Match idAndNameMatch in idAndNameMatches)
             {
-                int result;
-                if (int.TryParse(match.Groups[1].Value, out result))
+                int id = 0;
+                string name = string.Empty;
+
+                int idValue;
+                if (int.TryParse(idAndNameMatch.Groups[1].Value, out idValue))
                 {
-                    id = result;
+                    id = idValue;
                 }
-                name = match.Groups[2].Value;
+                if (!string.IsNullOrWhiteSpace(idAndNameMatch.Groups[2].Value) && idAndNameMatch.Groups[2].Value.Contains("http"))
+                {
+                    var itemNameFromImage = GetTextFromImage(idAndNameMatch.Groups[2].Value);
+                    Regex alts = new Regex(@"(\b[A-Za-z0-9 ',]{2,}\b)");
+                    MatchCollection altsMatches = alts.Matches(itemNameFromImage);
+                    if (altsMatches.Count > 0)
+                    {
+                        var nameList = new List<string>();
+                        foreach (Match altsMatch in altsMatches)
+                        {
+                            var val = altsMatch.Groups[1].Value;
+                            nameList.Add(val);
+                        }
+                        nameList = nameList.Distinct().ToList();
+                        var wowHeadItems = GetWowHeadItemInfo(nameList, slot, phase);
+                        foreach (var wowHeadItem in wowHeadItems)
+                        {
+                            result.Add(wowHeadItem);
+                        }
+                    }
+                }
+                else
+                {
+                    name = idAndNameMatch.Groups[2].Value;
+                }
+
+                if (id > 0 && !string.IsNullOrWhiteSpace(name))
+                {
+                    Item item = new Item(id, name, slot);
+                    item.PhaseList.Add(phase.Id);
+                    result.Add(item);
+                }
             }
 
-            Item item = new Item(id, name, slot);
-            item.PhaseList.Add(phase.Id);
-            return item;
+            return result;
         }
     }
 }
