@@ -16,6 +16,7 @@ using RestSharp;
 using System.Threading.Tasks;
 using System.Net.Http;
 using System.Net;
+using IronOcr;
 
 namespace BisTransfer
 {
@@ -25,16 +26,19 @@ namespace BisTransfer
         // at ~/.credentials/sheets.googleapis.com-dotnet-quickstart.json
         static string[] Scopes = { SheetsService.Scope.SpreadsheetsReadonly };
         static string ApplicationName = "BisTransfer";
+        const string spreadsheetId = "10IV_3NEmZdhh8iQXrs2Ek77YyUJbjBMWO5UxIWLlZl0";
 
         static void Main(string[] args)
         {
-            //var url = "https://i.imgur.com/uOHqdTz.png";
+            //var url = "https://i.imgur.com/0OTcLuc.png";
             //var Op = GetTextFromImage(url);
-
-            var res = GetWowHeadItemInfo(new List<string>() { "Thunderfury", "Puissant Cape", "Cape of the Black Baron" });
-
-            return;
-            const string spreadsheetId = "10IV_3NEmZdhh8iQXrs2Ek77YyUJbjBMWO5UxIWLlZl0";
+            //var url1 = "https://i.imgur.com/Rv6fzZt.png";
+            //var Op1 = GetTextFromImage(url1);
+            //var url2 = "https://i.imgur.com/uOHqdTz.png";
+            //var Op2 = GetTextFromImage(url2);
+            
+            //var res = GetWowHeadItemInfo(new List<string>() { "Naglering", "Thmll's Resolve", "Cape of the Black Baron" });
+            //return;
             UserCredential credential;
 
             using (var stream = new FileStream("credentials.json", FileMode.Open, FileAccess.Read))
@@ -60,11 +64,12 @@ namespace BisTransfer
 
             var phaseList = new List<Phase>()
             {
+                new Phase(1, "B83:BC103"),
                 new Phase(2, "B124:BC144"),
                 new Phase(3, "B203:BC223"),
                 new Phase(4, "B244:BC264"),
                 new Phase(5, "B361:BC381"),
-                new Phase(6, "B402:BC419"),
+                new Phase(6, "B402:BC419")
             };
 
             var rangeList = phaseList.Select(x => x.GetPhaseString());
@@ -89,7 +94,7 @@ namespace BisTransfer
 
                 new Character(14, CharacterEnum.Hunter),
 
-                new Character(17, CharacterEnum.Mage, SpecEnum.Frost),
+                new Character(17, CharacterEnum.Mage),
 
                 new Character(20, CharacterEnum.Paladin, SpecEnum.Holy),
                 new Character(23, CharacterEnum.Paladin, SpecEnum.Retribution),
@@ -98,7 +103,7 @@ namespace BisTransfer
                 new Character(29, CharacterEnum.Priest, SpecEnum.Holy),
                 new Character(32, CharacterEnum.Priest, SpecEnum.Shadow),
 
-                new Character(35, CharacterEnum.Rogue, SpecEnum.Sword),
+                new Character(35, CharacterEnum.Rogue),
 
                 new Character(38, CharacterEnum.Shaman, SpecEnum.Elemental),
                 new Character(41, CharacterEnum.Shaman, SpecEnum.Enchancement),
@@ -268,7 +273,23 @@ namespace BisTransfer
             filename = Path.GetFileName(imgUri.LocalPath);
             filePath = $@"{imageDir}\{filename}";
 
-            var Ocr = new IronOcr.AutoOcr();
+            var Ocr = new AdvancedOcr()
+            {
+                AcceptedOcrCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,()[]'",
+                CleanBackgroundNoise = false,
+                EnhanceContrast = false,
+                EnhanceResolution = true,
+                Language = IronOcr.Languages.English.OcrLanguagePack,
+                Strategy = AdvancedOcr.OcrStrategy.Advanced,
+                ColorSpace = AdvancedOcr.OcrColorSpace.Color,
+                DetectWhiteTextOnDarkBackgrounds = false,
+                InputImageType = AdvancedOcr.InputTypes.AutoDetect,
+                RotateAndStraighten = false,
+                ReadBarCodes = false,
+                ColorDepth = 32
+            };
+
+            //var Ocr = new IronOcr.AutoOcr();
             if (!File.Exists(filePath))
             {
                 using (WebClient client = new WebClient())
@@ -284,34 +305,68 @@ namespace BisTransfer
         internal static IList<Item> GetWowHeadItemInfo(IList<string> names, SlotEnum slot = SlotEnum.None, Phase phase = null)
         {
             var result = new List<Item>();
-            var searchUrl = @"https://www.wowhead.com/search/suggestions-template?q=";
+            var searchUrl = @"https://classic.wowhead.com/search/suggestions-template?q=";
 
             ServicePointManager.Expect100Continue = true;
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls
                    | SecurityProtocolType.Tls11
                    | SecurityProtocolType.Tls12
                    | SecurityProtocolType.Ssl3;
-
-            using (WebClient client = new WebClient())
+            Random rnd = new Random();
+            using (BisTransferDbEntities db = new BisTransferDbEntities())
             {
-                foreach (string name in names)
+                using (WebClient client = new WebClient())
                 {
-                    var data = client.DownloadString($"{searchUrl}{name}");
-                    var response = JsonConvert.DeserializeObject<WowHeadSearchResponse>(data);
-                    //todo: put result to database for cache
+                    foreach (string name in names)
+                    {
+                        var item = db.Items.SingleOrDefault(i => i.Name.Contains(name));
+                        if (item != null)
+                        {
+                            item.PhaseList.Add(phase.Id);
+                            result.Add(item);
+                        }
+                        else
+                        {
+                            Task<string> task = Task.Factory.StartNew(() => client.DownloadString($"{searchUrl}{name}"));
+                            var seed = rnd.Next(10, 600) * 1000;
+                            task.Wait(seed);
+                            if (task.IsCompleted)
+                            {
+                                var data = task.Result;
+                                var response = JsonConvert.DeserializeObject<WowHeadSearchResponse>(data);
+                                if (response != null && response.results.Any())
+                                {
+                                    var first = response.results.First(r => r.Type == 3 && (r.Quality == 3 || r.Quality == 4 || r.Quality == 5));
+
+                                    var itemToAdd = new Item(first.Id, first.Name, slot)
+                                    {
+                                        Quality = first.Quality,
+                                        Icon = first.Icon,
+                                        Type = first.Type,
+                                        TypeName = first.TypeName
+                                    };
+                                    db.Items.Add(itemToAdd);
+                                    itemToAdd.PhaseList.Add(phase.Id);
+                                    result.Add(itemToAdd);
+                                }
+                            }
+                        }                        
+                    }
                 }
+                db.SaveChanges();
             }
+
             return result;
         }
 
         internal static IList<Item> ParseItemRow(string row, SlotEnum slot, Phase phase)
         {
+            IList<Item> result = new List<Item>();
+
             if (string.IsNullOrWhiteSpace(row))
             {
-                return null;
-            }
-
-            IList<Item> result = new List<Item>();
+                return result;
+            }            
 
             //=HYPERLINK("https://classic.wowhead.com/item=10504/green-lens","Green Lens of Arcane Wrath")
             //=hyperlink("https://classic.wowhead.com/item=21581", Image("https://i.imgur.com/bUGqvjy.png", 2))

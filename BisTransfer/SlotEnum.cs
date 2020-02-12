@@ -1,6 +1,6 @@
 ﻿namespace BisTransfer
 {
-    enum SlotEnum
+    public enum SlotEnum
     {
         None = 0,
         Head = 1,
