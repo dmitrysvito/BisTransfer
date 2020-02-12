@@ -14,9 +14,9 @@ using System.Text.RegularExpressions;
 using System.Text;
 using RestSharp;
 using System.Threading.Tasks;
-using System.Net.Http;
 using System.Net;
 using IronOcr;
+using NLog;
 
 namespace BisTransfer
 {
@@ -27,16 +27,17 @@ namespace BisTransfer
         static string[] Scopes = { SheetsService.Scope.SpreadsheetsReadonly };
         static string ApplicationName = "BisTransfer";
         const string spreadsheetId = "10IV_3NEmZdhh8iQXrs2Ek77YyUJbjBMWO5UxIWLlZl0";
+        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
         static void Main(string[] args)
         {
-            //var url = "https://i.imgur.com/0OTcLuc.png";
+            //var url = "https://i.imgur.com/EGOLHFU.png";
             //var Op = GetTextFromImage(url);
-            //var url1 = "https://i.imgur.com/Rv6fzZt.png";
+            //var url1 = "https://i.imgur.com/pPNpJRO.png";
             //var Op1 = GetTextFromImage(url1);
-            //var url2 = "https://i.imgur.com/uOHqdTz.png";
+            //var url2 = "https://i.imgur.com/5aYGkhU.png";
             //var Op2 = GetTextFromImage(url2);
-            
+
             //var res = GetWowHeadItemInfo(new List<string>() { "Naglering", "Thmll's Resolve", "Cape of the Black Baron" });
             //return;
             UserCredential credential;
@@ -52,7 +53,7 @@ namespace BisTransfer
                     "user",
                     CancellationToken.None,
                     new FileDataStore(credPath, true)).Result;
-                Console.WriteLine("Credential file saved to: " + credPath);
+                Logger.Info("Credential file saved to: " + credPath);
             }
 
             // Create Google Sheets API service.
@@ -151,8 +152,10 @@ namespace BisTransfer
 
             foreach (var character in characterList)
             {
+                Logger.Info($"Started processing {character.Title} {character.Spec}");
                 foreach (var phase in phaseList)
                 {
+                    Logger.Info($"Phase {phase.Id}");
                     var charRaw = phase.Raw[character.Id];
                     character.PhaseList.Add(new Phase(phase.Id, phase.Range)
                     {
@@ -185,6 +188,8 @@ namespace BisTransfer
                 }
             }
 
+            Logger.Info("Document parsed. Creating files.");
+
             string writePath = @"{0}{1}.lua";
             string writePathShort = @"{0}.lua";
             string bisPattern = @"<Script file=""{0}{1}.lua"" />";
@@ -200,6 +205,7 @@ namespace BisTransfer
             sb.AppendLine(@"<Ui xmlns=""http://www.blizzard.com/wow/ui/"">");
             foreach (var character in characterList)
             {
+                Logger.Info($"Creating file for {character.Title} {character.Spec}");
                 string filePath;
                 if (character.Spec != SpecEnum.None)
                 {
@@ -236,7 +242,7 @@ namespace BisTransfer
                 sw.Write(sb.ToString());
             }
 
-
+            Logger.Info("Work Complete!");
             Console.Read();
         }
 
@@ -275,7 +281,6 @@ namespace BisTransfer
 
             var Ocr = new AdvancedOcr()
             {
-                AcceptedOcrCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz,()[]'",
                 CleanBackgroundNoise = false,
                 EnhanceContrast = false,
                 EnhanceResolution = true,
@@ -283,13 +288,12 @@ namespace BisTransfer
                 Strategy = AdvancedOcr.OcrStrategy.Advanced,
                 ColorSpace = AdvancedOcr.OcrColorSpace.Color,
                 DetectWhiteTextOnDarkBackgrounds = false,
-                InputImageType = AdvancedOcr.InputTypes.AutoDetect,
+                InputImageType = AdvancedOcr.InputTypes.Snippet,
                 RotateAndStraighten = false,
                 ReadBarCodes = false,
-                ColorDepth = 32
+                ColorDepth = 0
             };
 
-            //var Ocr = new IronOcr.AutoOcr();
             if (!File.Exists(filePath))
             {
                 using (WebClient client = new WebClient())
@@ -297,9 +301,39 @@ namespace BisTransfer
                     client.DownloadFile(imgUri, filePath);
                 }
             }
-            
-            var Result = Ocr.Read(filePath);
-            return Result.Text;
+
+            var result = string.Empty;
+
+            using (BisTransferDbEntities db = new BisTransferDbEntities())
+            {
+                try
+                {
+                    var scan = db.Scans.SingleOrDefault(s => s.Path == filename);
+                    if (scan == null)
+                    {
+                        result = Ocr.Read(filePath).Text;
+                        var newScan = new Scan()
+                        {
+                            Path = filename,
+                            Text = result
+                        };
+                        db.Scans.Add(newScan);
+                        db.SaveChanges();
+                        Logger.Info($"File dowloaded and scanned {filename}. Result text: {result}");
+                    }
+                    else
+                    {
+                        result = scan.Text;
+                        Logger.Info($"File scan info retrived from DB {filename}. Result text: {result}");
+                    }                    
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, "Error during file scan");
+                }                
+            }
+
+            return result;
         }
 
         internal static IList<Item> GetWowHeadItemInfo(IList<string> names, SlotEnum slot = SlotEnum.None, Phase phase = null)
@@ -330,6 +364,7 @@ namespace BisTransfer
                         {
                             item.PhaseList.Add(phase.Id);
                             result.Add(item);
+                            Logger.Info($"Retrived info from database for {name}. Id is {item.Id}");
                         }
                         else
                         {
@@ -364,6 +399,7 @@ namespace BisTransfer
                                             
                                         }
                                         result.Add(itemToAdd);
+                                        Logger.Info($"Retrived info from WowHead for {name}. Id is {itemToAdd.Id}");
                                     }
                                 }
                             }
@@ -385,31 +421,6 @@ namespace BisTransfer
                 return result;
             }
 
-            //=HYPERLINK("https://classic.wowhead.com/item=10504/green-lens","Green Lens of Arcane Wrath")
-            //=hyperlink("https://classic.wowhead.com/item=21581", Image("https://i.imgur.com/bUGqvjy.png", 2))
-            var exceptionsList = new List<string>()
-            {
-                "noncdwarn",
-                "human",
-                "orc",
-                "non",
-                "dwarf",
-                "rtight",
-                "Marshal's anellar Gloves",
-                "dwal'ves",
-                "dwarves",
-                "dwatvesn",
-                "nonorcn",
-                "nomrcn",
-                "nomad"
-            };
-            var correctionDictionary = new Dictionary<string, string>();
-            correctionDictionary.Add("Empored Leggings", "Empowered Leggings");
-            correctionDictionary.Add("Iskyshroud Leggings", "Skyshroud Leggings");
-            correctionDictionary.Add("ightsiayer Shoulderpnds", "Nightslayer Shoulder Pads");
-            correctionDictionary.Add("Gem of Trapped Innocents with TFI", "Gem of Trapped Innocents");
-            correctionDictionary.Add("Rockfury Bracers with TFI", "Rockfury Bracers");            
-
             Regex idAndName = new Regex(@"=(\d+).*"".+""(.+)""");
             MatchCollection idAndNameMatches = idAndName.Matches(row);
 
@@ -426,48 +437,35 @@ namespace BisTransfer
                 if (!string.IsNullOrWhiteSpace(idAndNameMatch.Groups[2].Value) && idAndNameMatch.Groups[2].Value.Contains("http"))
                 {
                     var itemNameFromImage = GetTextFromImage(idAndNameMatch.Groups[2].Value);
-                    Regex firstCorrection = new Regex(@"( IKnight-Lieutertanrs )|( t IFnight-Lieutertartrs )|( Ctthaltirieutenant )|( ' )|( [A-Za-z] [A-Z])[A-Z]|( I)[A-Z]|( [A-Za-z] )|(l )[[(i]");
-                    var itemNameFromImageCorrected = firstCorrection.Replace(itemNameFromImage, @" / ");
+                    
+                    Regex alts = new Regex(@"(\b[A-Za-z ',-]{2,}\b)");
+                    Regex correction = new Regex(@"( t )|( I )");
 
-                    Regex alts = new Regex(@"(\b[A-Za-z ',]{2,}\b)");
-                    MatchCollection altsMatches = alts.Matches(itemNameFromImageCorrected);
+                    var corrected = correction.Replace(itemNameFromImage, " / ");
+
+                    MatchCollection altsMatches = alts.Matches(corrected);
                     if (altsMatches.Count > 0)
                     {
                         var nameList = new List<string>();
                         foreach (Match altsMatch in altsMatches)
                         {
                             var val = altsMatch.Groups[1].Value;
-                            if (!exceptionsList.Contains(val))
-                            {
-                                nameList.Add(val);
-                            }                            
+                            nameList.Add(val);
                         }
                         nameList = nameList.Distinct().ToList();
 
                         var newItem = new Item(id, nameList.First(), slot);
                         newItem.PhaseList.Add(phase.Id);
                         result.Add(newItem);
+                        Logger.Info($"Item {newItem.Name} added for phase {phase.Id}");
 
-                        nameList.Remove(nameList.First());
+                        nameList.Remove(nameList.First());                       
 
-                        var correctedList = new List<string>();
-                        foreach (string itemToCorrect in nameList)
-                        {
-                            string newValue;
-                            if (correctionDictionary.ContainsKey(itemToCorrect) && correctionDictionary.TryGetValue(itemToCorrect, out newValue))
-                            {
-                                correctedList.Add(newValue);
-                            }
-                            else
-                            {
-                                correctedList.Add(itemToCorrect);
-                            }
-                        }                        
-
-                        var wowHeadItems = GetWowHeadItemInfo(correctedList, slot, phase);
+                        var wowHeadItems = GetWowHeadItemInfo(nameList, slot, phase);
                         foreach (var wowHeadItem in wowHeadItems)
                         {
                             result.Add(wowHeadItem);
+                            Logger.Info($"Item {wowHeadItem.Name} added for phase {phase.Id}");
                         }
                     }
                 }
@@ -481,6 +479,7 @@ namespace BisTransfer
                     Item item = new Item(id, name, slot);
                     item.PhaseList.Add(phase.Id);
                     result.Add(item);
+                    Logger.Info($"Item {item.Name} added for phase {phase.Id}");
                 }
             }
 

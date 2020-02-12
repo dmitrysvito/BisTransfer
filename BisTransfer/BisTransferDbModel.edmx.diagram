@@ -6,6 +6,7 @@
     <edmx:Diagrams>
       <Diagram DiagramId="5c444e95bd734b87a26ec702236d6b24" Name="Diagram1">
         <EntityTypeShape EntityType="BisTransferDbModel.Item" Width="1.5" PointX="0.75" PointY="0.75" IsExpanded="true" />
+        <EntityTypeShape EntityType="BisTransferDbModel.Scan" Width="1.5" PointX="3.375" PointY="0.75" />
       </Diagram>
     </edmx:Diagrams>
   </edmx:Designer>

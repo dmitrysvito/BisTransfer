@@ -26,5 +26,6 @@ namespace BisTransfer
         }
     
         public virtual DbSet<Item> Items { get; set; }
+        public virtual DbSet<Scan> Scans { get; set; }
     }
 }
