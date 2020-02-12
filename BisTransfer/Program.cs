@@ -305,6 +305,12 @@ namespace BisTransfer
         internal static IList<Item> GetWowHeadItemInfo(IList<string> names, SlotEnum slot = SlotEnum.None, Phase phase = null)
         {
             var result = new List<Item>();
+
+            if (!names.Any())
+            {
+                return result;
+            }
+
             var searchUrl = @"https://classic.wowhead.com/search/suggestions-template?q=";
 
             ServicePointManager.Expect100Continue = true;
@@ -336,18 +342,29 @@ namespace BisTransfer
                                 var response = JsonConvert.DeserializeObject<WowHeadSearchResponse>(data);
                                 if (response != null && response.results.Any())
                                 {
-                                    var first = response.results.First(r => r.Type == 3 && (r.Quality == 3 || r.Quality == 4 || r.Quality == 5));
-
-                                    var itemToAdd = new Item(first.Id, first.Name, slot)
+                                    //Type == 3 => item
+                                    //Quality 2 - green 3 - blue 4 - epic 5 - legendary
+                                    var first = response.results.FirstOrDefault(r => r.Type == 3 && (r.Quality == 2 || r.Quality == 3 || r.Quality == 4 || r.Quality == 5));
+                                    if (first != null)
                                     {
-                                        Quality = first.Quality,
-                                        Icon = first.Icon,
-                                        Type = first.Type,
-                                        TypeName = first.TypeName
-                                    };
-                                    db.Items.Add(itemToAdd);
-                                    itemToAdd.PhaseList.Add(phase.Id);
-                                    result.Add(itemToAdd);
+                                        var itemToAdd = new Item(first.Id, first.Name, slot)
+                                        {
+                                            Quality = first.Quality,
+                                            Icon = first.Icon,
+                                            Type = first.Type,
+                                            TypeName = first.TypeName
+                                        };
+
+                                        var itemExists = db.Items.SingleOrDefault(i => i.Id == itemToAdd.Id);
+
+                                        if (itemExists == null)
+                                        {
+                                            db.Items.Add(itemToAdd);
+                                            itemToAdd.PhaseList.Add(phase.Id);
+                                            
+                                        }
+                                        result.Add(itemToAdd);
+                                    }
                                 }
                             }
                         }                        
@@ -366,10 +383,33 @@ namespace BisTransfer
             if (string.IsNullOrWhiteSpace(row))
             {
                 return result;
-            }            
+            }
 
             //=HYPERLINK("https://classic.wowhead.com/item=10504/green-lens","Green Lens of Arcane Wrath")
             //=hyperlink("https://classic.wowhead.com/item=21581", Image("https://i.imgur.com/bUGqvjy.png", 2))
+            var exceptionsList = new List<string>()
+            {
+                "noncdwarn",
+                "human",
+                "orc",
+                "non",
+                "dwarf",
+                "rtight",
+                "Marshal's anellar Gloves",
+                "dwal'ves",
+                "dwarves",
+                "dwatvesn",
+                "nonorcn",
+                "nomrcn",
+                "nomad"
+            };
+            var correctionDictionary = new Dictionary<string, string>();
+            correctionDictionary.Add("Empored Leggings", "Empowered Leggings");
+            correctionDictionary.Add("Iskyshroud Leggings", "Skyshroud Leggings");
+            correctionDictionary.Add("ightsiayer Shoulderpnds", "Nightslayer Shoulder Pads");
+            correctionDictionary.Add("Gem of Trapped Innocents with TFI", "Gem of Trapped Innocents");
+            correctionDictionary.Add("Rockfury Bracers with TFI", "Rockfury Bracers");            
+
             Regex idAndName = new Regex(@"=(\d+).*"".+""(.+)""");
             MatchCollection idAndNameMatches = idAndName.Matches(row);
 
@@ -386,18 +426,45 @@ namespace BisTransfer
                 if (!string.IsNullOrWhiteSpace(idAndNameMatch.Groups[2].Value) && idAndNameMatch.Groups[2].Value.Contains("http"))
                 {
                     var itemNameFromImage = GetTextFromImage(idAndNameMatch.Groups[2].Value);
-                    Regex alts = new Regex(@"(\b[A-Za-z0-9 ',]{2,}\b)");
-                    MatchCollection altsMatches = alts.Matches(itemNameFromImage);
+                    Regex firstCorrection = new Regex(@"( IKnight-Lieutertanrs )|( t IFnight-Lieutertartrs )|( Ctthaltirieutenant )|( ' )|( [A-Za-z] [A-Z])[A-Z]|( I)[A-Z]|( [A-Za-z] )|(l )[[(i]");
+                    var itemNameFromImageCorrected = firstCorrection.Replace(itemNameFromImage, @" / ");
+
+                    Regex alts = new Regex(@"(\b[A-Za-z ',]{2,}\b)");
+                    MatchCollection altsMatches = alts.Matches(itemNameFromImageCorrected);
                     if (altsMatches.Count > 0)
                     {
                         var nameList = new List<string>();
                         foreach (Match altsMatch in altsMatches)
                         {
                             var val = altsMatch.Groups[1].Value;
-                            nameList.Add(val);
+                            if (!exceptionsList.Contains(val))
+                            {
+                                nameList.Add(val);
+                            }                            
                         }
                         nameList = nameList.Distinct().ToList();
-                        var wowHeadItems = GetWowHeadItemInfo(nameList, slot, phase);
+
+                        var newItem = new Item(id, nameList.First(), slot);
+                        newItem.PhaseList.Add(phase.Id);
+                        result.Add(newItem);
+
+                        nameList.Remove(nameList.First());
+
+                        var correctedList = new List<string>();
+                        foreach (string itemToCorrect in nameList)
+                        {
+                            string newValue;
+                            if (correctionDictionary.ContainsKey(itemToCorrect) && correctionDictionary.TryGetValue(itemToCorrect, out newValue))
+                            {
+                                correctedList.Add(newValue);
+                            }
+                            else
+                            {
+                                correctedList.Add(itemToCorrect);
+                            }
+                        }                        
+
+                        var wowHeadItems = GetWowHeadItemInfo(correctedList, slot, phase);
                         foreach (var wowHeadItem in wowHeadItems)
                         {
                             result.Add(wowHeadItem);
